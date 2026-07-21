@@ -192,7 +192,7 @@ namespace BlackChess.SRPG.Battle
 
             if (plan.attack && plan.attackTarget != null && !unit.HasActed)
             {
-                AttackAction.Execute(unit, plan.attackTarget);
+                AttackAction.Execute(grid, unit, plan.attackTarget);
             }
             else if (plan.wait && !unit.HasActed)
             {
@@ -239,7 +239,7 @@ namespace BlackChess.SRPG.Battle
         public void PlayerAttack(Unit unit, Unit target)
         {
             if (!WaitingForPlayer || unit.faction != CurrentFaction) return;
-            AttackAction.Execute(unit, target);
+            AttackAction.Execute(grid, unit, target);
             CheckObjectives();
         }
 

@@ -58,7 +58,7 @@ namespace BlackChess.SRPG.AI
 
             // 有威脅 → 迎擊。
             var plan = new UnitPlan();
-            if (AITactics.CanAttackFrom(self.Coord, self, threat))
+            if (AITactics.CanAttackFrom(grid, self.Coord, self, threat))
             {
                 plan.attack = true;
                 plan.attackTarget = threat;
@@ -74,7 +74,7 @@ namespace BlackChess.SRPG.AI
             }
 
             GridCoord attackFrom = plan.move ? plan.moveTarget : self.Coord;
-            if (AITactics.CanAttackFrom(attackFrom, self, threat))
+            if (AITactics.CanAttackFrom(grid, attackFrom, self, threat))
             {
                 plan.attack = true;
                 plan.attackTarget = threat;

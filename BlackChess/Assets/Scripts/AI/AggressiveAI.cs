@@ -20,7 +20,7 @@ namespace BlackChess.SRPG.AI
             var plan = new UnitPlan();
 
             // 若原地就打得到，直接攻擊，不必移動。
-            if (AITactics.CanAttackFrom(self.Coord, self, target))
+            if (AITactics.CanAttackFrom(grid, self.Coord, self, target))
             {
                 plan.attack = true;
                 plan.attackTarget = target;
@@ -36,7 +36,7 @@ namespace BlackChess.SRPG.AI
             }
 
             // 移動到新位置後，若能攻擊就攻擊。
-            if (AITactics.CanAttackFrom(step, self, target))
+            if (AITactics.CanAttackFrom(grid, step, self, target))
             {
                 plan.attack = true;
                 plan.attackTarget = target;

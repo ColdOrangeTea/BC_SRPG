@@ -26,7 +26,7 @@ namespace BlackChess.SRPG.AI
 
             var plan = new UnitPlan();
 
-            if (AITactics.CanAttackFrom(self.Coord, self, target))
+            if (AITactics.CanAttackFrom(context.Grid, self.Coord, self, target))
             {
                 plan.attack = true;
                 plan.attackTarget = target;
@@ -41,7 +41,7 @@ namespace BlackChess.SRPG.AI
                 plan.moveTarget = step;
             }
 
-            if (AITactics.CanAttackFrom(step, self, target))
+            if (AITactics.CanAttackFrom(context.Grid, step, self, target))
             {
                 plan.attack = true;
                 plan.attackTarget = target;

@@ -6,6 +6,7 @@ using BlackChess.SRPG.Items;
 using BlackChess.SRPG.Objectives;
 using BlackChess.SRPG.Objects;
 using BlackChess.SRPG.Units;
+using BlackChess.SRPG.View;
 using UnityEngine;
 
 namespace BlackChess.SRPG.Samples
@@ -119,8 +120,16 @@ namespace BlackChess.SRPG.Samples
             Faction player = factions[0], ally = factions[1], enemy = factions[2];
 
             // 玩家兩名：SPD 合 = 4+4 = 8
-            Spawn(playerUnitPrefab, player, "劍士", new GridCoord(1, 1), hp: 20, atk: 6, rng: 1, mov: 4, spd: 4);
-            Spawn(playerUnitPrefab, player, "弓手", new GridCoord(1, 2), hp: 16, atk: 5, rng: 2, mov: 4, spd: 4);
+            var swordsman = Spawn(playerUnitPrefab, player, "劍士", new GridCoord(1, 1), hp: 20, atk: 6, rng: 1, mov: 4, spd: 4);
+            var archer = Spawn(playerUnitPrefab, player, "弓手", new GridCoord(1, 2), hp: 16, atk: 5, rng: 2, mov: 4, spd: 4);
+
+            // 給玩家單位一些起始道具，方便立即測試「道具」指令列表 (正式專案可改成靠撿取取得)。
+            if (potionItem != null)
+            {
+                swordsman.Inventory.Add(potionItem);
+                swordsman.Inventory.Add(potionItem);
+                archer.Inventory.Add(potionItem);
+            }
 
             // 盟軍一名 (守衛型 AI)：SPD 合 = 6
             var guardian = Spawn(allyUnitPrefab, ally, "守衛", new GridCoord(1, 4), hp: 18, atk: 5, rng: 1, mov: 4, spd: 6);
@@ -215,6 +224,10 @@ namespace BlackChess.SRPG.Samples
             cam.orthographic = true;
             cam.orthographicSize = height * 0.5f + 1f;
             cam.transform.position = new Vector3(width * 0.5f, height * 0.5f, -10f);
+
+            // 掛上視野控制 (滾輪縮放 + Slider + 左鍵拖曳平移)，以上面設定的取景當成固定的預設視野。
+            if (cam.GetComponent<BattleCameraController>() == null)
+                cam.gameObject.AddComponent<BattleCameraController>();
         }
     }
 }

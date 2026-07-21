@@ -38,11 +38,15 @@ namespace BlackChess.SRPG.AI
             return best;
         }
 
-        /// <summary>從 candidateCoord 這一格出發，射程內是否打得到 target。</summary>
-        public static bool CanAttackFrom(GridCoord fromCoord, Unit self, Unit target)
+        /// <summary>
+        /// 從 fromCoord 這一格出發，射程內且視線暢通是否打得到 target。
+        /// 視線判定與攻擊一致：敵方單位與擋視線的地形/物件會擋，同勢力友軍不擋。
+        /// </summary>
+        public static bool CanAttackFrom(BattleGrid grid, GridCoord fromCoord, Unit self, Unit target)
         {
-            return target != null && target.IsAlive &&
-                   fromCoord.ManhattanDistanceTo(target.Coord) <= self.Stats.rng;
+            if (target == null || !target.IsAlive) return false;
+            if (fromCoord.ManhattanDistanceTo(target.Coord) > self.Stats.rng) return false;
+            return LineOfSight.HasLineOfSight(grid, fromCoord, target.Coord, self);
         }
     }
 }
