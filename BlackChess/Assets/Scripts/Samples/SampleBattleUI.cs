@@ -14,26 +14,25 @@ namespace BlackChess.SRPG.Samples
 {
     /// <summary>
     /// 【範例】最精簡的戰鬥畫面 + 玩家操作。
-    /// 為了「不依賴任何美術資源、換到任何渲染管線都能顯示」，這裡刻意用 OnGUI 直接把棋盤、
-    /// 單位、可移動範圍畫成色塊 —— 正式專案請改用 Sprite / Tilemap / UI，邏輯呼叫方式完全相同。
+    /// 棋盤、單位、範圍高亮與指令選單用 OnGUI 畫 (不依賴美術資源)；道具列表則改用真正的 uGUI
+    /// (你的 BattleItemCanva / UI_ItemCell prefab)，由 <see cref="BattleItemListUI"/> 管理。
     ///
     /// 操作方式：
-    ///   • 左鍵點自己的單位 → 選取，於旁邊彈出指令選單 (攻擊 / 移動 / 待機 / 道具)。
-    ///   • 攻擊 → 進入選目標模式，點紅色高亮的敵人發動攻擊。
-    ///   • 移動 → 進入選格模式，點藍色可移動範圍移動。
-    ///   • 道具 → 展開一行道具列表，滑鼠 hover 或方向鍵/滾輪選取 (高光淡入淡出)，Enter/點擊使用。
-    ///   • 待機 → 該單位防禦並結束行動。   Esc → 取消目前選取/選單。
-    ///   • Enter / E → 結束玩家勢力回合，換 AI 行動。
-    ///   • 左鍵拖曳 → 平移視野；滾輪 → 縮放 (由 BattleCameraController 處理)。
-    ///
-    /// 它只透過 BattleManager 的 Player* 公開方法下令，示範玩家端該怎麼接。
+    ///   • 左鍵點自己的單位 → 選取，於旁邊彈出指令選單 (攻擊 / 移動 / 待機 / 道具)。選單可用滑鼠拖曳移動。
+    ///   • 選了某個行動後，指令選單會收起；按 Esc 取消該行動則再度顯示。
+    ///   • 攻擊 → 點紅框敵人；移動 → 點藍色範圍；道具 → 開啟捲動道具列表；待機 → 防禦並結束。
+    ///   • Enter / E → 結束玩家勢力回合。   Esc → 取消目前選取/選單。
+    ///   • 左鍵拖曳空白處 → 平移視野；滾輪 → 縮放 (由 BattleCameraController 處理)。
     /// </summary>
     public class SampleBattleUI : MonoBehaviour
     {
         private enum Mode { Idle, Menu, MoveTargeting, AttackTargeting, ItemList }
 
+        private const int MenuWindowId = 9701;
+
         private SampleBattleSetup _setup;
         private BattleCameraController _view;
+        private BattleItemListUI _itemList;
         private BattleGrid Grid => _setup != null ? _setup.Grid : null;
         private BattleManager Manager => _setup != null ? _setup.Manager : null;
 
@@ -43,10 +42,9 @@ namespace BlackChess.SRPG.Samples
         private readonly List<Unit> _attackTargets = new List<Unit>();
         private bool _busy;
 
-        // 道具列表狀態
-        private int _itemIndex;    // 目前選取的道具索引
-        private int _itemScroll;   // 目前可視範圍的第一個道具索引
-        private const int ItemVisible = 4; // 一次顯示幾個道具欄位
+        // 指令選單 (可拖曳的視窗)
+        private Rect _menuRect;
+        private bool _menuPlaced;
 
         // 戰況面板收合
         private bool _hudCollapsed;
@@ -59,11 +57,15 @@ namespace BlackChess.SRPG.Samples
 
         private Texture2D _tex;   // 1x1 白貼圖，配合 GUI.color 畫任意顏色方塊
         private GUIStyle _label;
+        private GUIStyle _menuTitle;
 
         private void Awake()
         {
             _setup = FindFirstObjectByType<SampleBattleSetup>();
             _view = FindFirstObjectByType<BattleCameraController>();
+            _itemList = GetComponent<BattleItemListUI>();
+            if (_itemList == null) _itemList = gameObject.AddComponent<BattleItemListUI>();
+
             _tex = new Texture2D(1, 1);
             _tex.SetPixel(0, 0, Color.white);
             _tex.Apply();
@@ -72,13 +74,11 @@ namespace BlackChess.SRPG.Samples
         // ---------------- 輸入 ----------------
         private void Update()
         {
-            // 不論何時都先更新「滑鼠是否在 UI 上」，讓視野控制知道要不要讓路。
-            UpdatePointerOverUI();
+            UpdatePointerOverUI(); // 隨時更新，讓視野控制知道要不要讓路
 
             if (Manager == null || Grid == null) return;
             if (_view == null) _view = FindFirstObjectByType<BattleCameraController>();
 
-            // 戰鬥結束 / 非玩家回合 → 收起選取 (但仍允許縮放拖曳視野)。
             if (Manager.Result != ObjectiveState.InProgress ||
                 !Manager.WaitingForPlayer || Manager.CurrentFaction == null)
             {
@@ -93,24 +93,16 @@ namespace BlackChess.SRPG.Samples
 
         private void HandleKeyboard()
         {
-            // 結束我方回合
+            // 道具列表開啟時，鍵盤交給列表自己處理 (方向鍵/Enter/Esc)。
+            if (_itemList != null && _itemList.IsOpen) return;
+
             if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.E))
             {
-                if (_mode == Mode.ItemList) { UseSelectedItem(); return; } // 道具列表中 Enter = 使用
                 Manager.EndPlayerFactionTurn();
                 ResetSelection();
                 return;
             }
 
-            if (_mode == Mode.ItemList)
-            {
-                if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.UpArrow)) MoveItemSelection(-1);
-                else if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.DownArrow)) MoveItemSelection(+1);
-                else if (Input.GetKeyDown(KeyCode.Escape)) _mode = Mode.Menu;
-                return;
-            }
-
-            // 取消：選單/選目標 → 收回選取
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 if (_mode == Mode.MoveTargeting || _mode == Mode.AttackTargeting) _mode = Mode.Menu;
@@ -118,13 +110,15 @@ namespace BlackChess.SRPG.Samples
                 return;
             }
 
-            // 快捷鍵：空白鍵待機
-            if (Input.GetKeyDown(KeyCode.Space) && _selected != null && !_selected.HasActed)
+            if (Input.GetKeyDown(KeyCode.Space) && _selected != null && !_selected.HasActed && _mode == Mode.Menu)
                 DoWait();
         }
 
         private void HandleWorldClick()
         {
+            // 道具列表開啟時，點擊交給 uGUI (EventSystem)。
+            if (_itemList != null && _itemList.IsOpen) return;
+
             if (Input.GetMouseButtonDown(0))
                 _pressOverUI = BattleCameraController.PointerOverUI;
 
@@ -170,14 +164,13 @@ namespace BlackChess.SRPG.Samples
                 ResetSelection();
         }
 
-        /// <summary>選目標模式下點到別處：若點到另一個我方可動單位就改選它，否則退回指令選單。</summary>
         private void CancelTargetingOrReselect(Tile tile)
         {
             if (tile != null && tile.occupant != null && tile.occupant != _selected &&
                 tile.occupant.faction == Manager.CurrentFaction && !tile.occupant.HasFinishedTurn)
                 Select(tile.occupant);
             else
-                _mode = Mode.Menu;
+                _mode = Mode.Menu; // 回到指令選單 (選單重新顯示)
         }
 
         // ---------------- 玩家行動 ----------------
@@ -185,6 +178,7 @@ namespace BlackChess.SRPG.Samples
         {
             _selected = unit;
             _mode = Mode.Menu;
+            _menuPlaced = false; // 換單位 → 選單重新貼到新單位旁
             RefreshReachable();
         }
 
@@ -193,7 +187,7 @@ namespace BlackChess.SRPG.Samples
             _busy = true;
             yield return Manager.PlayerMove(unit, target); // 內含 Dijkstra 找路 + 移動動畫 + 撿道具
             _busy = false;
-            _mode = Mode.Menu;   // 移動後回到選單 (可能還能攻擊/用道具)
+            _mode = Mode.Menu;
             RefreshReachable();
             if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
         }
@@ -212,39 +206,36 @@ namespace BlackChess.SRPG.Samples
             ResetSelection();
         }
 
-        private void UseSelectedItem()
+        private void OpenItemList()
         {
-            if (_selected == null) return;
-            var items = _selected.Inventory.Items;
-            if (_itemIndex < 0 || _itemIndex >= items.Count) return;
+            if (_selected == null || _itemList == null) return;
+            _mode = Mode.ItemList; // 選單收起，改顯示道具列表
+            _itemList.Open(_selected, OnItemChosen, OnItemCancelled);
+        }
 
-            var item = items[_itemIndex];
-            Manager.PlayerUseItem(_selected, item, _selected); // 範例：對自己使用 (回血/回魔)
+        private void OnItemChosen(ItemData item)
+        {
+            if (_selected != null && item != null)
+                Manager.PlayerUseItem(_selected, item, _selected); // 範例：對自己使用 (回血/回魔)
+
+            _itemList.Close();
             _mode = Mode.Menu;
             RefreshReachable();
-            if (_selected.HasFinishedTurn) ResetSelection();
+            if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
         }
 
-        private void MoveItemSelection(int delta)
+        private void OnItemCancelled()
         {
-            if (_selected == null) return;
-            int count = _selected.Inventory.Count;
-            if (count == 0) return;
-            _itemIndex = Mathf.Clamp(_itemIndex + delta, 0, count - 1);
-            EnsureItemVisible(count);
-        }
-
-        private void EnsureItemVisible(int count)
-        {
-            if (_itemIndex < _itemScroll) _itemScroll = _itemIndex;
-            if (_itemIndex > _itemScroll + ItemVisible - 1) _itemScroll = _itemIndex - ItemVisible + 1;
-            _itemScroll = Mathf.Clamp(_itemScroll, 0, Mathf.Max(0, count - ItemVisible));
+            _itemList.Close();
+            _mode = Mode.Menu; // 取消 → 回到指令選單
         }
 
         private void ResetSelection()
         {
+            if (_itemList != null && _itemList.IsOpen) _itemList.Close();
             _selected = null;
             _mode = Mode.Idle;
+            _menuPlaced = false;
             _reachable.Clear();
             _attackTargets.Clear();
         }
@@ -295,6 +286,8 @@ namespace BlackChess.SRPG.Samples
         /// <summary>用上一幀 OnGUI 蒐集到的面板矩形，判斷滑鼠是否停在 UI 上，寫回視野控制。</summary>
         private void UpdatePointerOverUI()
         {
+            if (_itemList != null && _itemList.IsOpen) { BattleCameraController.PointerOverUI = true; return; }
+
             Vector2 gui = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
             bool over = false;
             for (int i = 0; i < _uiRects.Count; i++)
@@ -307,6 +300,7 @@ namespace BlackChess.SRPG.Samples
         {
             if (Grid == null) return;
             _label ??= new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontSize = 11, wordWrap = true };
+            _menuTitle ??= new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontSize = 11, fontStyle = FontStyle.Bold };
             _uiRects.Clear();
 
             // 地形
@@ -354,7 +348,7 @@ namespace BlackChess.SRPG.Samples
 
             DrawHud();
             DrawUnitMenu();
-            DrawItemList();
+            DrawTargetingHint();
         }
 
         // ---------------- 戰況面板 (可收合) ----------------
@@ -362,7 +356,6 @@ namespace BlackChess.SRPG.Samples
         {
             if (_hudCollapsed)
             {
-                // 收合時：左上角側邊欄按鈕，按一下展開。
                 var tab = new Rect(6, 6, 96, 28);
                 _uiRects.Add(tab);
                 if (GUI.Button(tab, "▶ 戰況")) _hudCollapsed = false;
@@ -390,68 +383,71 @@ namespace BlackChess.SRPG.Samples
                 else GUILayout.Label("AI 行動中…");
             }
             GUILayout.Space(6);
-            GUILayout.Label("左鍵: 選單位 → 指令選單 (攻擊/移動/待機/道具)");
+            GUILayout.Label("左鍵: 選單位 → 指令選單 (可拖曳)");
             GUILayout.Label("左鍵拖曳: 平移視野   滾輪: 縮放");
             GUILayout.Label("Enter/E: 結束我方回合   Esc: 取消");
             GUILayout.EndArea();
         }
 
-        // ---------------- 單位指令選單 ----------------
+        // ---------------- 單位指令選單 (可拖曳視窗；只在 Menu 模式顯示) ----------------
         private void DrawUnitMenu()
         {
-            if (_selected == null || _mode == Mode.ItemList) return;
+            if (_selected == null || _mode != Mode.Menu) return;
 
-            const float mw = 96f, bh = 28f, gap = 5f;
-            float mh = 4 * bh + 5 * gap + 4f;
+            if (!_menuPlaced) { PlaceMenu(); _menuPlaced = true; }
 
+            _menuRect = GUI.Window(MenuWindowId, _menuRect, DrawMenuWindow, GUIContent.none);
+            _menuRect.x = Mathf.Clamp(_menuRect.x, 0f, Screen.width - _menuRect.width);
+            _menuRect.y = Mathf.Clamp(_menuRect.y, 0f, Screen.height - _menuRect.height);
+            _uiRects.Add(_menuRect);
+        }
+
+        private void PlaceMenu()
+        {
+            const float mw = 108f;
+            float mh = MenuHeight();
             var ur = CellRect(_selected.Coord);
             float mx = ur.xMax + 8f;
             float my = ur.y;
-            if (mx + mw > Screen.width) mx = ur.x - mw - 8f;   // 右邊放不下 → 改放左邊
+            if (mx + mw > Screen.width) mx = ur.x - mw - 8f; // 右邊放不下 → 改放左邊
             mx = Mathf.Clamp(mx, 0f, Screen.width - mw);
             my = Mathf.Clamp(my, 0f, Screen.height - mh);
+            _menuRect = new Rect(mx, my, mw, mh);
+        }
 
-            var menu = new Rect(mx, my, mw, mh);
-            _uiRects.Add(menu);
-            GUI.Box(menu, GUIContent.none);
+        private const float MenuTitleH = 20f, MenuBtnH = 28f, MenuGap = 5f;
+        private static float MenuHeight() => MenuTitleH + 4 * MenuBtnH + 5 * MenuGap;
 
-            float bx = mx + gap, bw = mw - gap * 2f, by = my + gap;
+        private void DrawMenuWindow(int id)
+        {
+            float w = _menuRect.width;
+            GUI.Label(new Rect(0, 2, w, MenuTitleH - 2), "≡ 行動", _menuTitle);
 
-            // 攻擊
-            if (MenuButton(new Rect(bx, by, bw, bh), "攻擊", HasAnyAttackTarget()))
+            float bx = MenuGap, bw = w - MenuGap * 2f, by = MenuTitleH + MenuGap;
+
+            if (MenuButton(new Rect(bx, by, bw, MenuBtnH), "攻擊", HasAnyAttackTarget()))
             {
                 RecomputeAttackTargets();
                 _mode = _attackTargets.Count > 0 ? Mode.AttackTargeting : Mode.Menu;
             }
-            by += bh + gap;
+            by += MenuBtnH + MenuGap;
 
-            // 移動
-            if (MenuButton(new Rect(bx, by, bw, bh), "移動", !_selected.HasMoved))
+            if (MenuButton(new Rect(bx, by, bw, MenuBtnH), "移動", !_selected.HasMoved))
             {
                 RefreshReachable();
                 _mode = Mode.MoveTargeting;
             }
-            by += bh + gap;
+            by += MenuBtnH + MenuGap;
 
-            // 待機
-            if (MenuButton(new Rect(bx, by, bw, bh), "待機", !_selected.HasActed))
+            if (MenuButton(new Rect(bx, by, bw, MenuBtnH), "待機", !_selected.HasActed))
                 DoWait();
-            by += bh + gap;
+            by += MenuBtnH + MenuGap;
 
-            // 道具
-            if (MenuButton(new Rect(bx, by, bw, bh), "道具", !_selected.HasActed && _selected.Inventory.Count > 0))
-            {
-                _itemIndex = 0; _itemScroll = 0;
-                _mode = Mode.ItemList;
-            }
+            if (MenuButton(new Rect(bx, by, bw, MenuBtnH), "道具", !_selected.HasActed && _selected.Inventory.Count > 0))
+                OpenItemList();
 
-            // 選目標模式時給個提示
-            if (_mode == Mode.MoveTargeting || _mode == Mode.AttackTargeting)
-            {
-                var hint = new Rect(mx, my + mh + 4f, Mathf.Max(mw, 150f), 22f);
-                _uiRects.Add(hint);
-                GUI.Box(hint, _mode == Mode.MoveTargeting ? "點藍色格移動 (Esc取消)" : "點紅框敵人攻擊 (Esc取消)");
-            }
+            // 只讓標題列可拖曳，避免拖動時誤觸按鈕。
+            GUI.DragWindow(new Rect(0, 0, w, MenuTitleH));
         }
 
         private bool MenuButton(Rect r, string text, bool enabled)
@@ -463,95 +459,15 @@ namespace BlackChess.SRPG.Samples
             return clicked;
         }
 
-        // ---------------- 道具列表 (一行、可捲動、高光淡入淡出) ----------------
-        private void DrawItemList()
+        private void DrawTargetingHint()
         {
-            if (_selected == null || _mode != Mode.ItemList) return;
+            if (_selected == null) return;
+            if (_mode != Mode.MoveTargeting && _mode != Mode.AttackTargeting) return;
 
-            var items = _selected.Inventory.Items;
-            int count = items.Count;
-
-            const float slotW = 118f, slotH = 66f, pad = 8f, arrowW = 26f;
-            float panelW = arrowW * 2f + ItemVisible * slotW + pad * 2f + 4f;
-            float panelH = slotH + 44f;
-            float px = (Screen.width - panelW) * 0.5f;
-            float py = Screen.height - panelH - 90f; // 留出底部縮放 Slider 的空間
-
-            var panel = new Rect(px, py, panelW, panelH);
-            _uiRects.Add(panel);
-            GUI.Box(panel, GUIContent.none);
-
-            var title = new Rect(px, py + 4f, panelW, 20f);
-            GUI.Label(title, "道具 — 方向鍵/滾輪選擇，Enter 或點擊使用，Esc 返回", _label);
-
-            Event e = Event.current;
-
-            // 面板上滾輪 → 移動選取 (視野縮放已因 PointerOverUI 停用)
-            if (e.type == EventType.ScrollWheel && panel.Contains(e.mousePosition))
-            {
-                MoveItemSelection(e.delta.y > 0f ? 1 : -1);
-                e.Use();
-            }
-
-            float slotY = py + 28f;
-
-            // 左箭頭
-            var leftArrow = new Rect(px + pad, slotY, arrowW, slotH);
-            if (GUI.Button(leftArrow, "◀") && count > 0) MoveItemSelection(-1);
-
-            // 道具欄位
-            float startX = px + pad + arrowW + 2f;
-            for (int slot = 0; slot < ItemVisible; slot++)
-            {
-                int index = _itemScroll + slot;
-                var r = new Rect(startX + slot * slotW, slotY, slotW - 4f, slotH);
-
-                if (index < 0 || index >= count)
-                {
-                    DrawBox(r, new Color(0f, 0f, 0f, 0.15f)); // 空欄位
-                    continue;
-                }
-
-                var item = items[index];
-                bool hovered = r.Contains(e.mousePosition);
-                if (hovered) _itemIndex = index; // 滑鼠 hover 即選取
-
-                // 底色
-                DrawBox(r, new Color(0.12f, 0.12f, 0.16f, 0.85f));
-
-                // 高光淡入淡出 (選取中的欄位)
-                if (index == _itemIndex)
-                {
-                    float a = 0.25f + 0.35f * Mathf.PingPong(Time.unscaledTime * 2f, 1f);
-                    DrawBox(r, new Color(1f, 0.85f, 0.3f, a));
-                    DrawBorder(r, new Color(1f, 0.9f, 0.4f), 2f);
-                }
-
-                DrawLabel(new Rect(r.x, r.y + 6f, r.width, r.height - 12f),
-                    $"{item.itemName}\n{EffectText(item)}", Color.white);
-
-                // 點擊使用
-                if (hovered && e.type == EventType.MouseDown && e.button == 0)
-                {
-                    _itemIndex = index;
-                    UseSelectedItem();
-                    e.Use();
-                }
-            }
-
-            // 右箭頭
-            var rightArrow = new Rect(px + panelW - pad - arrowW, slotY, arrowW, slotH);
-            if (GUI.Button(rightArrow, "▶") && count > 0) MoveItemSelection(1);
-        }
-
-        private static string EffectText(ItemData item)
-        {
-            switch (item.effectType)
-            {
-                case ItemEffectType.Heal: return $"回復HP {item.amount}";
-                case ItemEffectType.RestoreMP: return $"回復MP {item.amount}";
-                default: return "增益";
-            }
+            var ur = CellRect(_selected.Coord);
+            var hint = new Rect(Mathf.Clamp(ur.x, 0, Screen.width - 220), Mathf.Clamp(ur.yMax + 4, 0, Screen.height - 24), 220, 22);
+            _uiRects.Add(hint);
+            GUI.Box(hint, _mode == Mode.MoveTargeting ? "點藍色格移動 (Esc 取消)" : "點紅框敵人攻擊 (Esc 取消)");
         }
 
         // ---------------- 繪圖小工具 ----------------

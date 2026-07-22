@@ -11,9 +11,9 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b00f59c342133b84d9ef9ba580c3448b, type: 3}
   m_Name: Item_Potion
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: 
   itemName: Potion
-  description: "回復 HP 8 點"
+  description: "\u56DE\u5FA9 HP 8 \u9EDE max 300words"
   icon: {fileID: 0}
   effectType: 0
   amount: 8
