@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BlackChess.SRPG.Core;
+using BlackChess.SRPG.Items;
 using BlackChess.SRPG.Objects;
 using BlackChess.SRPG.Pathfinding;
 using BlackChess.SRPG.Units;
@@ -53,18 +54,55 @@ namespace BlackChess.SRPG.Actions
             return damage;
         }
 
-        /// <summary>攻擊可破壞物件 (例如瓶子)。回傳是否命中。</summary>
-        public static bool ExecuteOnObject(BattleGrid grid, Unit attacker, InteractableObject obj)
+        /// <summary>
+        /// 未來的「範圍攻擊 / 技能」判定某單位是否會被 attacker 的攻擊影響：
+        /// 敵人一定會；同陣營夥伴取決於 attacker 的 attackAffectsAllies 設定 (無差別大範圍傷害等)。
+        /// </summary>
+        public static bool AttackAffects(Unit attacker, Unit target)
+        {
+            if (attacker == null) return false;
+            return HitPolicy.HarmAffects(attacker.faction, target, attacker.Stats.attackAffectsAllies);
+        }
+
+        /// <summary>是否可攻擊此物件 (具「可破壞」功能、尚未破壞、在射程內且視線暢通)。</summary>
+        public static bool CanAttackObject(BattleGrid grid, Unit attacker, InteractableObject obj)
         {
             if (attacker == null || obj == null || attacker.HasActed) return false;
-            if (!CanReach(grid, attacker, obj.Coord)) return false;
-
             var breakable = obj.GetBehavior<BreakableBehavior>();
-            if (breakable == null) return false;
+            if (breakable == null || breakable.IsBroken) return false;
+            return CanReach(grid, attacker, obj.Coord);
+        }
 
-            breakable.TakeDamage(attacker.Stats.atk);
+        /// <summary>攻擊可破壞物件 (例如瓶子)。回傳是否命中。</summary>
+        public static bool ExecuteOnObject(BattleGrid grid, Unit attacker, InteractableObject obj)
+            => ExecuteOnObject(grid, attacker, obj, out _);
+
+        /// <summary>
+        /// 攻擊可破壞物件。回傳是否命中；drop 為物件被打壞時生成的掉落道具 (沒破壞或不掉落則為 null)，
+        /// 供呼叫端接著執行「自動撿起」流程。
+        /// </summary>
+        public static bool ExecuteOnObject(BattleGrid grid, Unit attacker, InteractableObject obj, out FieldItem drop)
+        {
+            drop = null;
+            if (!CanAttackObject(grid, attacker, obj)) return false;
+
+            obj.GetBehavior<BreakableBehavior>().TakeDamage(attacker.Stats.atk, out drop);
             attacker.MarkActed();
             return true;
+        }
+
+        /// <summary>列出 attacker 射程 + 視線內、所有可攻擊的「可破壞物件」(供玩家 UI 高亮)。</summary>
+        public static List<InteractableObject> GetObjectTargetsInRange(BattleGrid grid, Unit attacker)
+        {
+            var result = new List<InteractableObject>();
+            if (grid == null || attacker == null) return result;
+            foreach (var kv in grid.Tiles)
+            {
+                var obj = kv.Value.interactable;
+                if (obj != null && CanAttackObject(grid, attacker, obj))
+                    result.Add(obj);
+            }
+            return result;
         }
 
         /// <summary>

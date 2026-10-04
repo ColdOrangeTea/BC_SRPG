@@ -311,6 +311,8 @@ MonoBehaviour:
   slimeType: {fileID: 0}
   wallType: {fileID: 0}
   potionItem: {fileID: 0}
+  bombItem: {fileID: 0}
+  keyItem: {fileID: 0}
 --- !u!114 &1000023
 MonoBehaviour:
   m_ObjectHideFlags: 0

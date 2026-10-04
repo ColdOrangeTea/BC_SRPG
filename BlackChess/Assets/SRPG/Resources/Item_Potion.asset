@@ -13,8 +13,14 @@ MonoBehaviour:
   m_Name: Item_Potion
   m_EditorClassIdentifier: 
   itemName: Potion
-  description: "\u56DE\u5FA9 HP 8 \u9EDE max 300words"
+  description: "\u56DE\u5FA9 HP 8 \u9EDE\u3002\u4EE5\u4F7F\u7528\u8005\u70BA\u4E2D\u5FC3\uFF0C\u9130\u8FD1
+    1 \u683C\u5167\u7684\u540C\u9663\u71DF\u5925\u4F34\u4E5F\u6703\u56DE\u5FA9\u3002"
   icon: {fileID: 0}
+  category: 0
   effectType: 0
   amount: 8
   consumable: 1
+  targeting: 0
+  useRange: 1
+  effectRadius: 1
+  affectsAllies: 1

@@ -41,7 +41,10 @@ namespace BlackChess.SRPG.View
 
         private void Awake()
         {
+            // prefab 放在 Resources/UI/ 底下；為相容舊路徑，找不到時再嘗試根目錄。
+            if (canvaPrefab == null) canvaPrefab = Resources.Load<GameObject>("UI/BattleItemCanva");
             if (canvaPrefab == null) canvaPrefab = Resources.Load<GameObject>("BattleItemCanva");
+            if (cellPrefab == null) cellPrefab = Resources.Load<GameObject>("UI/UI_ItemCell");
             if (cellPrefab == null) cellPrefab = Resources.Load<GameObject>("UI_ItemCell");
         }
 

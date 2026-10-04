@@ -5,7 +5,9 @@ using System.Linq;
 using BlackChess.SRPG.Actions;
 using BlackChess.SRPG.AI;
 using BlackChess.SRPG.Core;
+using BlackChess.SRPG.Items;
 using BlackChess.SRPG.Objectives;
+using BlackChess.SRPG.Objects;
 using BlackChess.SRPG.Units;
 using UnityEngine;
 
@@ -230,7 +232,8 @@ namespace BlackChess.SRPG.Battle
             if (MoveAction.CanMoveTo(grid, unit, target, out _, out var path))
             {
                 yield return MoveAction.Execute(grid, unit, path);
-                ItemAction.TryPickUpNearby(grid, unit); // 移動後自動嘗試撿腳邊道具
+                // 移動後自動撿腳邊道具 (含演出：道具飛向角色淡出 → 提示文字)。
+                yield return ItemAction.PickUpNearbyAnimated(grid, unit);
                 CheckObjectives();
             }
         }
@@ -243,6 +246,39 @@ namespace BlackChess.SRPG.Battle
             CheckObjectives();
         }
 
+        /// <summary>
+        /// 玩家指令：攻擊可破壞物件 (協程)。物件被打壞掉落道具時，
+        /// 由撿取範圍內的單位「自動撿起」(優先攻擊者；範圍內沒人則留在原地，等有人走近再撿)。
+        /// </summary>
+        public IEnumerator PlayerAttackObject(Unit unit, InteractableObject obj)
+        {
+            if (!WaitingForPlayer || unit.faction != CurrentFaction) yield break;
+            if (!AttackAction.ExecuteOnObject(grid, unit, obj, out var drop)) yield break;
+
+            if (drop != null)
+            {
+                var picker = FindAutoPicker(unit, drop);
+                if (picker != null)
+                    yield return drop.PickUpAnimated(picker);
+            }
+            CheckObjectives();
+        }
+
+        /// <summary>找掉落道具的自動撿取者：優先攻擊者本人，其次任何在撿取範圍內的我方(同陣營)單位。</summary>
+        private Unit FindAutoPicker(Unit attacker, FieldItem drop)
+        {
+            if (drop.CanBePickedUpBy(attacker)) return attacker;
+
+            foreach (var f in factions)
+            {
+                if (f == null || attacker.faction == null || !attacker.faction.IsFriendlyTo(f)) continue;
+                foreach (var u in f.LivingUnits)
+                    if (drop.CanBePickedUpBy(u))
+                        return u;
+            }
+            return null;
+        }
+
         /// <summary>玩家指令：待機 (防禦)。</summary>
         public void PlayerWait(Unit unit)
         {
@@ -250,11 +286,23 @@ namespace BlackChess.SRPG.Battle
             WaitAction.Execute(unit);
         }
 
-        /// <summary>玩家指令：使用道具。</summary>
-        public void PlayerUseItem(Unit unit, Items.ItemData item, Unit target)
+        /// <summary>玩家指令：使用道具 (單體目標，向後相容)。</summary>
+        public void PlayerUseItem(Unit unit, ItemData item, Unit target)
         {
             if (!WaitingForPlayer || unit.faction != CurrentFaction) return;
             ItemAction.Use(unit, item, target);
+        }
+
+        /// <summary>
+        /// 玩家指令：對目標格使用道具 (補品/傷害道具的範圍版)。
+        /// 目標格須在「以使用角色為中心 useRange 格內」(自身座標永遠合法)。回傳是否成功使用。
+        /// </summary>
+        public bool PlayerUseItemAt(Unit unit, ItemData item, GridCoord targetCoord)
+        {
+            if (!WaitingForPlayer || unit.faction != CurrentFaction) return false;
+            bool used = ItemAction.UseAt(grid, unit, item, targetCoord);
+            if (used) CheckObjectives(); // 傷害道具可能擊倒敵人
+            return used;
         }
 
         // ---------- 目標判定 ----------

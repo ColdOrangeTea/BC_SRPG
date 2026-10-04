@@ -44,6 +44,8 @@ namespace BlackChess.SRPG.Samples
         public TileType slimeType;
         public TileType wallType;
         public ItemData potionItem;
+        public ItemData bombItem;   // 傷害道具範例：投擲型範圍傷害
+        public ItemData keyItem;    // 關鍵道具範例：不能使用
 
         // 供 UI 讀取的執行時期引用
         public BattleGrid Grid { get; private set; }
@@ -72,6 +74,8 @@ namespace BlackChess.SRPG.Samples
             if (slimeType == null) slimeType = Resources.Load<TileType>("Tile_Slime");
             if (wallType == null) wallType = Resources.Load<TileType>("Tile_Wall");
             if (potionItem == null) potionItem = Resources.Load<ItemData>("Item_Potion");
+            if (bombItem == null) bombItem = Resources.Load<ItemData>("Item_Bomb");
+            if (keyItem == null) keyItem = Resources.Load<ItemData>("Item_OldKey");
         }
 
         // ---------- 1. 棋盤 ----------
@@ -130,6 +134,8 @@ namespace BlackChess.SRPG.Samples
                 swordsman.Inventory.Add(potionItem);
                 archer.Inventory.Add(potionItem);
             }
+            if (bombItem != null) archer.Inventory.Add(bombItem);   // 投擲型傷害道具 (會波及友軍，小心使用)
+            if (keyItem != null) swordsman.Inventory.Add(keyItem);  // 關鍵道具：選了會提示無法使用
 
             // 盟軍一名 (守衛型 AI)：SPD 合 = 6
             var guardian = Spawn(allyUnitPrefab, ally, "守衛", new GridCoord(1, 4), hp: 18, atk: 5, rng: 1, mov: 4, spd: 6);
@@ -174,20 +180,15 @@ namespace BlackChess.SRPG.Samples
             field.data = potionItem;
             field.PlaceOnGrid(Grid, new GridCoord(3, 2));
 
-            // (b) 可破壞的瓶子：打破後掉落藥水。dropPrefab 用一個停用的 FieldItem 當範本。
+            // (b) 可破壞的瓶子：可被選為攻擊目標，打破後掉落藥水並自動撿起。
+            //     掉落物直接用 dropData 指定道具資料 (破壞時自動生成 FieldItem)。
             var bottleGO = Instantiate(bottlePrefab);
             var bottle = bottleGO.GetComponent<InteractableObject>();
             bottle.PlaceOnGrid(Grid, new GridCoord(7, 4));
 
             var breakable = bottleGO.GetComponent<BreakableBehavior>();
-            if (breakable != null)
-            {
-                var dropTemplate = new GameObject("Potion_DropTemplate");
-                var dropField = dropTemplate.AddComponent<FieldItem>();
-                dropField.data = potionItem;
-                dropTemplate.SetActive(false); // 當作 Prefab 範本，破壞時被 Instantiate 複製
-                breakable.dropPrefab = dropField;
-            }
+            if (breakable != null && breakable.dropData == null)
+                breakable.dropData = potionItem;
         }
 
         // ---------- 5. 目標 ----------

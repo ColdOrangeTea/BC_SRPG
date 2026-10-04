@@ -26,7 +26,7 @@ namespace BlackChess.SRPG.Samples
     /// </summary>
     public class SampleBattleUI : MonoBehaviour
     {
-        private enum Mode { Idle, Menu, MoveTargeting, AttackTargeting, ItemList }
+        private enum Mode { Idle, Menu, MoveTargeting, AttackTargeting, ItemList, ItemTargeting }
 
         private const int MenuWindowId = 9701;
 
@@ -40,6 +40,9 @@ namespace BlackChess.SRPG.Samples
         private Mode _mode = Mode.Idle;
         private readonly HashSet<GridCoord> _reachable = new HashSet<GridCoord>();
         private readonly List<Unit> _attackTargets = new List<Unit>();
+        private readonly List<Objects.InteractableObject> _attackObjects = new List<Objects.InteractableObject>(); // 可攻擊的可破壞物件
+        private ItemData _pendingItem;                                        // 等待指定目標格的道具
+        private readonly HashSet<GridCoord> _itemRange = new HashSet<GridCoord>(); // 道具可指定的目標格
         private bool _busy;
 
         // 指令選單 (可拖曳的視窗)
@@ -105,7 +108,12 @@ namespace BlackChess.SRPG.Samples
 
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                if (_mode == Mode.MoveTargeting || _mode == Mode.AttackTargeting) _mode = Mode.Menu;
+                if (_mode == Mode.MoveTargeting || _mode == Mode.AttackTargeting || _mode == Mode.ItemTargeting)
+                {
+                    _pendingItem = null;
+                    _itemRange.Clear();
+                    _mode = Mode.Menu;
+                }
                 else ResetSelection();
                 return;
             }
@@ -149,8 +157,21 @@ namespace BlackChess.SRPG.Samples
                 case Mode.AttackTargeting:
                     if (_selected != null && tile.occupant != null && _attackTargets.Contains(tile.occupant))
                         DoAttack(tile.occupant);
+                    else if (_selected != null && tile.interactable != null && _attackObjects.Contains(tile.interactable))
+                        StartCoroutine(DoAttackObject(tile.interactable)); // 攻擊可破壞物件 (瓶子/補給箱…)
                     else
                         CancelTargetingOrReselect(tile);
+                    break;
+
+                case Mode.ItemTargeting:
+                    if (_selected != null && _pendingItem != null && _itemRange.Contains(coord))
+                        DoUseItemAt(coord);
+                    else
+                    {
+                        _pendingItem = null;
+                        _itemRange.Clear();
+                        CancelTargetingOrReselect(tile);
+                    }
                     break;
             }
         }
@@ -200,6 +221,32 @@ namespace BlackChess.SRPG.Samples
             if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
         }
 
+        /// <summary>攻擊可破壞物件；打壞後的掉落與自動撿取演出由 BattleManager 處理。</summary>
+        private IEnumerator DoAttackObject(Objects.InteractableObject obj)
+        {
+            _busy = true;
+            yield return Manager.PlayerAttackObject(_selected, obj);
+            _busy = false;
+            _mode = Mode.Menu;
+            RefreshReachable();
+            if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
+        }
+
+        /// <summary>對指定格使用道具 (補品/傷害道具)。</summary>
+        private void DoUseItemAt(GridCoord coord)
+        {
+            var item = _pendingItem;
+            _pendingItem = null;
+            _itemRange.Clear();
+
+            if (Manager.PlayerUseItemAt(_selected, item, coord))
+                BattleMessageUI.Show($"{_selected.unitName} 使用了「{item.itemName}」");
+
+            _mode = Mode.Menu;
+            RefreshReachable();
+            if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
+        }
+
         private void DoWait()
         {
             Manager.PlayerWait(_selected);
@@ -215,13 +262,24 @@ namespace BlackChess.SRPG.Samples
 
         private void OnItemChosen(ItemData item)
         {
-            if (_selected != null && item != null)
-                Manager.PlayerUseItem(_selected, item, _selected); // 範例：對自己使用 (回血/回魔)
+            if (_selected == null || item == null) { OnItemCancelled(); return; }
+
+            // 關鍵道具：帶在身上、不能使用。
+            if (!item.IsUsable)
+            {
+                BattleMessageUI.Show($"「{item.itemName}」是關鍵道具，無法使用");
+                return; // 停留在道具列表，讓玩家改選其他道具
+            }
 
             _itemList.Close();
-            _mode = Mode.Menu;
-            RefreshReachable();
-            if (_selected != null && _selected.HasFinishedTurn) ResetSelection();
+
+            // 進入「指定目標格」模式：以使用角色為中心，高亮 useRange 內可指定的格子
+            // (SelfCentered 與 ThrowAtTile 皆同；useRange=0 時只能指定自己所在格)。
+            _pendingItem = item;
+            _itemRange.Clear();
+            foreach (var c in ItemAction.GetUsableCoords(Grid, _selected, item))
+                _itemRange.Add(c);
+            _mode = Mode.ItemTargeting;
         }
 
         private void OnItemCancelled()
@@ -238,6 +296,9 @@ namespace BlackChess.SRPG.Samples
             _menuPlaced = false;
             _reachable.Clear();
             _attackTargets.Clear();
+            _attackObjects.Clear();
+            _pendingItem = null;
+            _itemRange.Clear();
         }
 
         private void RefreshReachable()
@@ -253,6 +314,7 @@ namespace BlackChess.SRPG.Samples
         private void RecomputeAttackTargets()
         {
             _attackTargets.Clear();
+            _attackObjects.Clear();
             if (_selected == null) return;
             foreach (var f in Manager.factions)
             {
@@ -261,6 +323,9 @@ namespace BlackChess.SRPG.Samples
                     if (AttackAction.CanAttack(Grid, _selected, u))
                         _attackTargets.Add(u);
             }
+
+            // 可破壞物件也能被選為攻擊目標 (瓶子/補給箱…)。
+            _attackObjects.AddRange(AttackAction.GetObjectTargetsInRange(Grid, _selected));
         }
 
         private bool HasAnyAttackTarget()
@@ -272,7 +337,7 @@ namespace BlackChess.SRPG.Samples
                 foreach (var u in f.LivingUnits)
                     if (AttackAction.CanAttack(Grid, _selected, u)) return true;
             }
-            return false;
+            return AttackAction.GetObjectTargetsInRange(Grid, _selected).Count > 0;
         }
 
         private GridCoord MouseToCoord()
@@ -316,13 +381,26 @@ namespace BlackChess.SRPG.Samples
                 foreach (var c in _reachable)
                     DrawBox(CellRect(c), new Color(0.2f, 0.5f, 1f, 0.35f));
 
+            // 道具可指定的目標格高亮 (綠色，只在道具指定格模式顯示)
+            if (_mode == Mode.ItemTargeting)
+                foreach (var c in _itemRange)
+                    DrawBox(CellRect(c), new Color(0.2f, 0.9f, 0.4f, 0.35f));
+
             // 道具 / 物件
             foreach (var kv in Grid.Tiles)
             {
                 var tile = kv.Value;
                 var rect = CellRect(kv.Key);
                 if (tile.item != null) DrawLabel(rect, "道具", Color.yellow);
-                else if (tile.interactable != null) DrawLabel(rect, "瓶子", new Color(0.8f, 0.6f, 0.3f));
+                else if (tile.interactable != null)
+                {
+                    // 可破壞物件顯示耐久，其他物件顯示名稱。
+                    var breakable = tile.interactable.GetBehavior<Objects.BreakableBehavior>();
+                    string label = breakable != null
+                        ? $"物件\n{breakable.currentHP}/{breakable.maxHP}"
+                        : "物件";
+                    DrawLabel(rect, label, new Color(0.8f, 0.6f, 0.3f));
+                }
             }
 
             // 單位
@@ -335,20 +413,96 @@ namespace BlackChess.SRPG.Samples
                     var col = f.factionColor;
                     if (u.HasFinishedTurn) col *= 0.5f; // 已行動完 → 變暗
                     DrawBox(Shrink(rect, 6), col);
-                    if (u == _selected) DrawBorder(Shrink(rect, 4), Color.white);
                     DrawLabel(rect, $"{u.unitName}\n{u.Stats.currentHP}/{u.Stats.maxHP}", Color.black);
                 }
             }
 
-            // 可攻擊目標高亮 (選攻擊目標時)
+            // 可攻擊目標高亮 (選攻擊目標時)：敵方單位 + 可破壞物件都框紅框
             if (_mode == Mode.AttackTargeting)
+            {
                 foreach (var t in _attackTargets)
                     if (t != null && t.IsAlive)
                         DrawBorder(Shrink(CellRect(t.Coord), 2), new Color(1f, 0.3f, 0.3f), 3f);
 
+                foreach (var o in _attackObjects)
+                    if (o != null)
+                        DrawBorder(Shrink(CellRect(o.Coord), 2), new Color(1f, 0.3f, 0.3f), 3f);
+            }
+
+            // 選定格 + 滑鼠 hover 格：發亮外框提示 (畫在最上層、HUD 之下)
+            DrawHoverAndSelection();
+
             DrawHud();
             DrawUnitMenu();
             DrawTargetingHint();
+        }
+
+        // ---------------- 選定 / hover 格發亮外框 ----------------
+
+        /// <summary>
+        /// 提示玩家目前操作到哪一格：
+        ///   • 選定角色所在格 → 金色「呼吸」外框 (持續發亮)。
+        ///   • 滑鼠 hover 的格子 → 依目前行動模式變色的發亮外框：
+        ///       移動=藍、攻擊=紅、道具=綠 (合法目標亮、不合法暗白)；
+        ///       道具模式 hover 合法格時，同時預覽效果範圍 (橘色區域)。
+        /// </summary>
+        private void DrawHoverAndSelection()
+        {
+            float pulse = Mathf.PingPong(Time.unscaledTime * 3f, 1f); // 0..1 呼吸
+
+            // (1) 選定角色所在格：金色呼吸外框
+            if (_selected != null)
+            {
+                var gold = Color.Lerp(new Color(1f, 0.8f, 0.25f, 0.55f), new Color(1f, 0.95f, 0.6f, 1f), pulse);
+                DrawBorder(Shrink(CellRect(_selected.Coord), 1), gold, 3f);
+            }
+
+            // (2) hover 格：道具列表開啟或滑鼠在 UI 上時不顯示
+            if (_mode == Mode.ItemList) return;
+            if (BattleCameraController.PointerOverUI) return;
+
+            var coord = MouseToCoord();
+            if (!Grid.InBounds(coord)) return;
+            var tile = Grid.GetTile(coord);
+
+            bool valid;   // hover 的格子對目前行動而言是否為合法目標
+            Color baseCol;
+            switch (_mode)
+            {
+                case Mode.MoveTargeting:
+                    valid = _selected != null && !_selected.HasMoved && _reachable.Contains(coord);
+                    baseCol = new Color(0.35f, 0.65f, 1f);
+                    break;
+
+                case Mode.AttackTargeting:
+                    valid = (tile.occupant != null && _attackTargets.Contains(tile.occupant)) ||
+                            (tile.interactable != null && _attackObjects.Contains(tile.interactable));
+                    baseCol = new Color(1f, 0.35f, 0.35f);
+                    break;
+
+                case Mode.ItemTargeting:
+                    valid = _pendingItem != null && _itemRange.Contains(coord);
+                    baseCol = new Color(0.3f, 0.95f, 0.45f);
+
+                    // 預覽道具效果範圍：以 hover 格為中心 effectRadius 內染橘色
+                    if (valid)
+                        foreach (var kv in Grid.Tiles)
+                            if (kv.Key.ManhattanDistanceTo(coord) <= _pendingItem.effectRadius)
+                                DrawBox(CellRect(kv.Key), new Color(1f, 0.55f, 0.15f, 0.28f));
+                    break;
+
+                default: // Idle / Menu：hover 到可選取的我方未行動單位 → 亮白，否則淡白
+                    valid = Manager != null && Manager.WaitingForPlayer &&
+                            tile.occupant != null &&
+                            tile.occupant.faction == Manager.CurrentFaction && !tile.occupant.HasFinishedTurn;
+                    baseCol = Color.white;
+                    break;
+            }
+
+            // 合法目標 → 明亮呼吸；不合法 → 暗淡外框 (仍讓玩家知道滑鼠指到哪一格)
+            float a = valid ? Mathf.Lerp(0.65f, 1f, pulse) : 0.25f;
+            var hoverCol = new Color(baseCol.r, baseCol.g, baseCol.b, a);
+            DrawBorder(Shrink(CellRect(coord), 2), hoverCol, valid ? 3f : 2f);
         }
 
         // ---------------- 戰況面板 (可收合) ----------------
@@ -428,7 +582,10 @@ namespace BlackChess.SRPG.Samples
             if (MenuButton(new Rect(bx, by, bw, MenuBtnH), "攻擊", HasAnyAttackTarget()))
             {
                 RecomputeAttackTargets();
-                _mode = _attackTargets.Count > 0 ? Mode.AttackTargeting : Mode.Menu;
+                // 敵方單位「或」可破壞物件任一在射程內就進入攻擊選定模式
+                // (先前只檢查 _attackTargets，導致射程內只有可破壞物件時按了沒反應)。
+                _mode = (_attackTargets.Count > 0 || _attackObjects.Count > 0)
+                    ? Mode.AttackTargeting : Mode.Menu;
             }
             by += MenuBtnH + MenuGap;
 
@@ -462,12 +619,19 @@ namespace BlackChess.SRPG.Samples
         private void DrawTargetingHint()
         {
             if (_selected == null) return;
-            if (_mode != Mode.MoveTargeting && _mode != Mode.AttackTargeting) return;
+            if (_mode != Mode.MoveTargeting && _mode != Mode.AttackTargeting && _mode != Mode.ItemTargeting) return;
+
+            string text = _mode switch
+            {
+                Mode.MoveTargeting => "點藍色格移動 (Esc 取消)",
+                Mode.AttackTargeting => "點紅框目標攻擊 (Esc 取消)",
+                _ => "點綠色格使用道具 (Esc 取消)",
+            };
 
             var ur = CellRect(_selected.Coord);
             var hint = new Rect(Mathf.Clamp(ur.x, 0, Screen.width - 220), Mathf.Clamp(ur.yMax + 4, 0, Screen.height - 24), 220, 22);
             _uiRects.Add(hint);
-            GUI.Box(hint, _mode == Mode.MoveTargeting ? "點藍色格移動 (Esc 取消)" : "點紅框敵人攻擊 (Esc 取消)");
+            GUI.Box(hint, text);
         }
 
         // ---------------- 繪圖小工具 ----------------

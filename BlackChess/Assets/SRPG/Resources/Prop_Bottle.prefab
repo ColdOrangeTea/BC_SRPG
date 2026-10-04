@@ -44,8 +44,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ac86d39e90b214548bcd90cdbf6a2410, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
+  canBePushed: 0
+  canBeBroken: 1
+  isSwitch: 0
+  movesOnTrack: 0
+  featuresInitialized: 1
   blocksMovement: 1
   blocksLineOfSight: 0
   moveStepDuration: 0.12
@@ -64,6 +69,7 @@ MonoBehaviour:
   maxHP: 5
   currentHP: 5
   dropPrefab: {fileID: 0}
+  dropData: {fileID: 11400000, guid: d589b55200e641b9970984189b5f26b9, type: 2}
   destroyOnBreak: 1
 --- !u!1 &8203242146613773081
 GameObject:

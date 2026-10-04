@@ -18,6 +18,21 @@ namespace BlackChess.SRPG.Objects
     /// </summary>
     public class InteractableObject : MonoBehaviour
     {
+        [Header("功能 (勾選此物件擁有的功能種類，會自動同步對應的行為元件)")]
+        [Tooltip("可被推動 (PushableBehavior)。")]
+        public bool canBePushed;
+        [Tooltip("可被破壞 (BreakableBehavior)：有 HP、可被選為攻擊目標，破壞後可掉落道具。")]
+        public bool canBeBroken;
+        [Tooltip("是開關 (SwitchBehavior)：單位互動時觸發。")]
+        public bool isSwitch;
+        [Tooltip("沿軌道移動 (TrackMovableBehavior)：可被移動到其他地方的機關。")]
+        public bool movesOnTrack;
+
+        // 首次在 Inspector 顯示時，先把「已掛在物件上的行為元件」讀回勾選狀態，
+        // 避免舊 Prefab (直接掛元件的做法) 一開啟就被誤刪元件。
+        [SerializeField, HideInInspector] private bool featuresInitialized;
+
+        [Header("阻擋")]
         [Tooltip("是否阻擋單位移動 (箱子擋路=true；地上的開關=false)。")]
         public bool blocksMovement = true;
 
@@ -41,8 +56,66 @@ namespace BlackChess.SRPG.Objects
 
         private void Awake()
         {
+            SyncBehaviorsFromFlags();
             GetComponents(_behaviors);
+
+            // 用程式生成、直接掛元件的物件 (未經過 Inspector) → 反向把元件同步回勾選狀態，
+            // 讓 canBeBroken 等旗標在執行期也能正確反映實際功能。
+            canBePushed |= GetComponent<PushableBehavior>() != null;
+            canBeBroken |= GetComponent<BreakableBehavior>() != null;
+            isSwitch |= GetComponent<SwitchBehavior>() != null;
+            movesOnTrack |= GetComponent<TrackMovableBehavior>() != null;
         }
+
+        /// <summary>依勾選的功能旗標，補上缺少的行為元件 (執行期用；Editor 由 OnValidate 同步)。</summary>
+        private void SyncBehaviorsFromFlags()
+        {
+            if (canBePushed && GetComponent<PushableBehavior>() == null) gameObject.AddComponent<PushableBehavior>();
+            if (canBeBroken && GetComponent<BreakableBehavior>() == null) gameObject.AddComponent<BreakableBehavior>();
+            if (isSwitch && GetComponent<SwitchBehavior>() == null) gameObject.AddComponent<SwitchBehavior>();
+            if (movesOnTrack && GetComponent<TrackMovableBehavior>() == null) gameObject.AddComponent<TrackMovableBehavior>();
+        }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// Editor 裡勾/取消勾選功能時，自動加上或移除對應的行為元件，
+        /// 讓「一個物件同時具有多種功能」只要打勾就能組出來 (可推+可破壞的補給箱等)。
+        /// </summary>
+        private void OnValidate()
+        {
+            if (Application.isPlaying) return;
+
+            if (!featuresInitialized)
+            {
+                // 第一次：以「實際掛著的元件」為準初始化勾選狀態 (相容既有 Prefab)。
+                canBePushed |= GetComponent<PushableBehavior>() != null;
+                canBeBroken |= GetComponent<BreakableBehavior>() != null;
+                isSwitch |= GetComponent<SwitchBehavior>() != null;
+                movesOnTrack |= GetComponent<TrackMovableBehavior>() != null;
+                featuresInitialized = true;
+                return;
+            }
+
+            // OnValidate 中不允許直接 AddComponent/DestroyImmediate，延後一幀執行。
+            UnityEditor.EditorApplication.delayCall += () =>
+            {
+                if (this == null) return; // 物件可能已被刪除
+                SyncFeatureComponent<PushableBehavior>(canBePushed);
+                SyncFeatureComponent<BreakableBehavior>(canBeBroken);
+                SyncFeatureComponent<SwitchBehavior>(isSwitch);
+                SyncFeatureComponent<TrackMovableBehavior>(movesOnTrack);
+            };
+        }
+
+        private void SyncFeatureComponent<T>(bool enabled) where T : ObjectBehavior
+        {
+            var c = GetComponent<T>();
+            if (enabled && c == null)
+                UnityEditor.Undo.AddComponent<T>(gameObject);
+            else if (!enabled && c != null)
+                UnityEditor.Undo.DestroyObjectImmediate(c);
+        }
+#endif
 
         /// <summary>把物件登記到棋盤某格 (瞬間就位，用於開場佈置)。</summary>
         public void PlaceOnGrid(BattleGrid grid, GridCoord coord)

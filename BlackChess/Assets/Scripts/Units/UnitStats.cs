@@ -23,6 +23,11 @@ namespace BlackChess.SRPG.Units
         [Tooltip("射程 (RNG)：攻擊能觸及的曼哈頓距離。1=近戰、2以上=遠程。")]
         [Min(1)] public int rng = 1;
 
+        [Tooltip("是否會影響同陣營夥伴的血量：此單位的攻擊 (含未來的範圍技能) 會不會波及友軍。\n" +
+                 "false = 只會打到敵人；true = 無差別 (例如大範圍攻擊會誤傷同陣營夥伴)。\n" +
+                 "實際判定統一走 HitPolicy.HarmAffects。")]
+        public bool attackAffectsAllies = false;
+
         [Header("行動")]
         [Tooltip("移動力 (MOV)：一回合最多能消耗的移動成本。走一般地板可走 MOV 格，黏液減半。")]
         [Min(0)] public int mov = 4;
