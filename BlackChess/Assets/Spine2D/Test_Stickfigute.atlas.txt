@@ -1,0 +1,6 @@
+Test_Stickfigute.png
+size:413,413
+filter:Linear,Linear
+stick
+bounds:2,2,192,409
+offsets:26,0,256,512
