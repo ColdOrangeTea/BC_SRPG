@@ -15,7 +15,7 @@ namespace BlackChess.SRPG.View3D
     ///   3. 提供 格子座標 ↔ 世界座標 的轉換 (單位站位、滑鼠點選用)。
     ///
     /// 座標約定：GridCoord.x → 世界 +X，GridCoord.y → 世界 +Z；單位站立高度 = 棋盤物件的 Y + <see cref="standHeight"/>。
-    /// 此類別只管「外觀與座標」，地形規則仍由既有的 <see cref="BattleGrid"/> / <see cref="TileType"/> 負責，之後可接上。
+    /// 此類別只管「外觀與座標」，地形成本與擋路規則交給尋路模組 (BlackChess.SRPG.Pathfinding.IPathGrid / TileTypePathGrid)，之後可接上。
     /// </summary>
     public class Board3D : MonoBehaviour
     {
