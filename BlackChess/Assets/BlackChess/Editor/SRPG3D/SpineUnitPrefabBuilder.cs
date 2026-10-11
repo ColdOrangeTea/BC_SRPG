@@ -6,11 +6,12 @@
 ///     • 依「身高 (以格為單位)」自動縮放 Spine，換任何大小的美術都能一致地站在格子上
 ///     • 佔格 (footprint)：寬 × 深 的矩形，例如 1x1 一般角色、2x2 大型敵人；不規則形狀可在 Prefab 上再編輯
 ///     • 預設播放的動畫 (Idle 等)、美術預設面向、佔格標示材質
-///   產出位置：預設 Assets/Prefabs/View3D/Units/Unit_&lt;名稱&gt;.prefab
+///   產出位置：預設 &lt;BlackChess 根&gt;/Prefabs/View3D/Units/Unit_&lt;名稱&gt;.prefab
+///   (根資料夾由 BlackChessEditorPaths 依本工具所在位置推算，目前為 Assets/BlackChess)
 ///
 /// 使用方式：
 ///   Unity 上方選單 → Tools/SRPG 3D/單位 Prefab 產生器 (Spine Unit Prefab Builder)
-///   1. 指定 SkeletonDataAsset (例如 Assets/Spine2D/char_002_amiya_SkeletonData.asset)
+///   1. 指定 SkeletonDataAsset (例如 char_002_amiya_SkeletonData.asset)
 ///   2. 調整身高、佔格大小、預設動畫 → 按「產生 / 更新 Prefab」
 ///
 /// 可重複執行：會覆蓋更新既有產出（GUID 不變，引用不會斷）。
@@ -27,15 +28,18 @@ namespace BlackChess.SRPG.EditorTools
 {
     public class SpineUnitPrefabBuilder : EditorWindow
     {
-        public const string DefaultOutputFolder = "Assets/Prefabs/View3D/Units";
-        public const string FootprintMaterialPath = "Assets/Materials/View3D/FootprintMarker.mat";
+        // 路徑一律相對 BlackChess 根資料夾，資料夾搬家/改名後不用改程式。
+        public static string DefaultOutputFolder => BlackChessEditorPaths.Combine("Prefabs/View3D/Units");
+        public static string FootprintMaterialPath => BlackChessEditorPaths.Combine("Materials/View3D/FootprintMarker.mat");
+        public static string SpineFolder => BlackChessEditorPaths.Combine("Spine2D");
 
         /// <summary>產生單位 Prefab 需要的所有參數 (場景產生器也會用到)。</summary>
         public class Settings
         {
             public SkeletonDataAsset skeletonData;
             public string prefabName;
-            public string outputFolder = DefaultOutputFolder;
+            /// <summary>輸出資料夾。留空 = <see cref="DefaultOutputFolder"/>。</summary>
+            public string outputFolder;
             public float heightInCells = 1.5f;
             /// <summary>棋盤格子邊長 (世界單位)。角色世界身高 = heightInCells × cellSize。</summary>
             public float cellSize = 1f;
@@ -50,7 +54,7 @@ namespace BlackChess.SRPG.EditorTools
 
         private SkeletonDataAsset _skeletonData;
         private string _prefabName = "";
-        private string _outputFolder = DefaultOutputFolder;
+        private string _outputFolder; // ScriptableObject 建構時不能呼叫 AssetDatabase，於 OnEnable 帶入預設值
         private float _heightInCells = 1.5f;
         private float _cellSize = 1f;
         private int _footprintWidth = 1;
@@ -67,6 +71,8 @@ namespace BlackChess.SRPG.EditorTools
 
         private void OnEnable()
         {
+            if (string.IsNullOrEmpty(_outputFolder)) _outputFolder = DefaultOutputFolder;
+
             // 場景裡有 Board3D 就沿用它的格子邊長，產出的角色大小才會跟棋盤一致。
             var board = FindAnyObjectByType<Board3D>();
             if (board != null) _cellSize = board.cellSize;
@@ -74,7 +80,8 @@ namespace BlackChess.SRPG.EditorTools
             // 預設帶入專案內第一個 SkeletonDataAsset，方便直接試用。
             if (_skeletonData == null)
             {
-                var guids = AssetDatabase.FindAssets("t:SkeletonDataAsset", new[] { "Assets/Spine2D" });
+                string folder = AssetDatabase.IsValidFolder(SpineFolder) ? SpineFolder : BlackChessEditorPaths.Root;
+                var guids = AssetDatabase.FindAssets("t:SkeletonDataAsset", new[] { folder });
                 if (guids.Length > 0)
                     _skeletonData = AssetDatabase.LoadAssetAtPath<SkeletonDataAsset>(AssetDatabase.GUIDToAssetPath(guids[0]));
             }
@@ -163,8 +170,9 @@ namespace BlackChess.SRPG.EditorTools
             var data = s.skeletonData.GetSkeletonData(true);
             if (data == null) { message = $"{s.skeletonData.name} 讀取失敗，請確認 Spine 版本 (需 4.2) 與 atlas 是否正確。"; return null; }
 
-            EnsureFolder(s.outputFolder);
-            string path = $"{s.outputFolder}/{s.prefabName}.prefab";
+            string outputFolder = string.IsNullOrWhiteSpace(s.outputFolder) ? DefaultOutputFolder : s.outputFolder.Trim().TrimEnd('/');
+            EnsureFolder(outputFolder);
+            string path = $"{outputFolder}/{s.prefabName}.prefab";
             var footprintMat = EnsureFootprintMaterial();
 
             // 1) 根：GridUnitView3D
@@ -266,14 +274,7 @@ namespace BlackChess.SRPG.EditorTools
             return n.EndsWith(suffix) ? n.Substring(0, n.Length - suffix.Length) : n;
         }
 
-        /// <summary>逐層建立資料夾 (例如 Assets/Prefabs/View3D/Units)。</summary>
-        public static void EnsureFolder(string folder)
-        {
-            if (string.IsNullOrEmpty(folder) || AssetDatabase.IsValidFolder(folder)) return;
-            string parent = Path.GetDirectoryName(folder).Replace('\\', '/');
-            string leaf = Path.GetFileName(folder);
-            EnsureFolder(parent);
-            AssetDatabase.CreateFolder(parent, leaf);
-        }
+        /// <summary>逐層建立資料夾 (轉呼叫 BlackChessEditorPaths.EnsureFolder，保留給既有呼叫端)。</summary>
+        public static void EnsureFolder(string folder) => BlackChessEditorPaths.EnsureFolder(folder);
     }
 }

@@ -2,14 +2,16 @@
 /// 【Billboard 測試場景產生器】
 /// 工具說明：
 ///   一鍵建立「3D 格子棋盤 + Spine 角色 Billboard」的測試場景，產出：
-///     • Assets/Prefabs/View3D/Units/ 下的測試單位 Prefab (Spine：Assets/Spine2D/Test_Stickfigute_SkeletonData.asset，身高依格子邊長等比)
+///   (以下路徑的 &lt;Root&gt; 由 BlackChessEditorPaths 依本工具位置推算，目前為 Assets/BlackChess；
+///    輸入資源依「檔名 + 類型」在整個專案搜尋，搬資料夾也找得到)
+///     • &lt;Root&gt;/Prefabs/View3D/Units/ 下的測試單位 Prefab (Spine：Test_Stickfigute_SkeletonData，身高依格子邊長等比)
 ///         - Unit_Test_Stickfigute      (1x1，我方，面右)
 ///         - Unit_Enemy_1x1             (1x1，敵方，面左)
 ///         - Unit_BigEnemy_2x2          (2x2 大型敵人，身高 2.8 格)
 ///         - Unit_BigEnemy_3x1          (3x1 橫向大型敵人，身高 2.2 格)
-///     • Assets/Materials/View3D/FootprintMarker.mat (佔格標示材質)
-///     • Assets/Scenes/BillboardTest.unity
-///         - Board3D (以 Assets/Prefabs/GridCell/GridCell_Gress.prefab 鋪 10x7 格，照 Prefab 原尺寸擺放，
+///     • &lt;Root&gt;/Materials/View3D/FootprintMarker.mat (佔格標示材質)
+///     • &lt;Root&gt;/Scenes/BillboardTest.unity
+///         - Board3D (以 GridCell_Gress.prefab 鋪 10x7 格，照 Prefab 原尺寸擺放，
 ///           格子邊長 = 模型實際邊長、單位站在 Prefab 內的 Pos_Obj 高度)
 ///         - Main Camera + BattleCameraRig3D (透視 FOV 25、俯角 55)
 ///         - Directional Light、BillboardTestDemo (點選移動、切換 Billboard 模式)
@@ -35,9 +37,11 @@ namespace BlackChess.SRPG.EditorTools
 {
     public static class BillboardTestSceneBuilder
     {
-        private const string ScenePath = "Assets/Scenes/BillboardTest.unity";
-        private const string TileModelPath = "Assets/Prefabs/GridCell/GridCell_Gress.prefab";
-        private const string SkeletonAPath = "Assets/Spine2D/Test_Stickfigute_SkeletonData.asset";
+        // 輸出：相對 BlackChess 根資料夾；輸入：依檔名搜尋 (不依賴所在資料夾)。
+        private static string SceneFolder => BlackChessEditorPaths.Combine("Scenes");
+        private static string ScenePath => SceneFolder + "/BillboardTest.unity";
+        private const string TileModelName = "GridCell_Gress";
+        private const string SkeletonAName = "Test_Stickfigute_SkeletonData";
 
         private static readonly Color AllyColor = new Color(0.2f, 0.8f, 1f, 0.35f);
         private static readonly Color EnemyColor = new Color(1f, 0.3f, 0.25f, 0.35f);
@@ -50,12 +54,12 @@ namespace BlackChess.SRPG.EditorTools
         {
             if (interactive && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return "已取消";
 
-            var tile = AssetDatabase.LoadAssetAtPath<GameObject>(TileModelPath);
-            var skelA = AssetDatabase.LoadAssetAtPath<SkeletonDataAsset>(SkeletonAPath);
+            var tile = BlackChessEditorPaths.FindAsset<GameObject>(TileModelName);
+            var skelA = BlackChessEditorPaths.FindAsset<SkeletonDataAsset>(SkeletonAName);
             if (tile == null || skelA == null)
             {
                 return Notify(interactive, "Billboard 測試場景",
-                    $"缺少必要資源：\n{(tile == null ? TileModelPath + "\n" : "")}{(skelA == null ? SkeletonAPath : "")}");
+                    $"專案中找不到必要資源：\n{(tile == null ? TileModelName + " (Prefab)\n" : "")}{(skelA == null ? SkeletonAName + " (SkeletonDataAsset)" : "")}");
             }
 
             var report = new StringBuilder();
@@ -63,8 +67,8 @@ namespace BlackChess.SRPG.EditorTools
             // ---------- 1. 場景 + 棋盤 (先建棋盤，才知道格子邊長) ----------
             var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
             // NewScene 會卸載未被引用的資源，先前載入的參考可能失效 → 重新載入。
-            tile = AssetDatabase.LoadAssetAtPath<GameObject>(TileModelPath);
-            skelA = AssetDatabase.LoadAssetAtPath<SkeletonDataAsset>(SkeletonAPath);
+            tile = BlackChessEditorPaths.FindAsset<GameObject>(TileModelName);
+            skelA = BlackChessEditorPaths.FindAsset<SkeletonDataAsset>(SkeletonAName);
 
             var boardGo = new GameObject("Board3D");
             var board = boardGo.AddComponent<Board3D>();
@@ -117,7 +121,7 @@ namespace BlackChess.SRPG.EditorTools
             demo.board = board;
             demo.cameraRig = cam != null ? cam.GetComponent<BattleCameraRig3D>() : null;
 
-            SpineUnitPrefabBuilder.EnsureFolder("Assets/Scenes");
+            BlackChessEditorPaths.EnsureFolder(SceneFolder);
             EditorSceneManager.SaveScene(scene, ScenePath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
